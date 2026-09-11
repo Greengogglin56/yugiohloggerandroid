@@ -1,11 +1,13 @@
-package com.example.yu_gi_ohlogger // <--- Change this to match YOUR package name if different
+package com.example.yu_gi_ohlogger // <--- Keep your package name here
 
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -41,7 +43,7 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = Color(0xFF121212)
                 ) {
-                    BinderLoggerScreen()
+                    AppNavigation()
                 }
             }
         }
@@ -56,9 +58,105 @@ val RARITIES = listOf(
 
 val EDITIONS = listOf("1st Edition", "Unlimited", "Limited")
 
+@Composable
+fun AppNavigation() {
+    val context = LocalContext.current
+    var activeCsvUri by remember { mutableStateOf<Uri?>(null) }
+    var activeFile by remember { mutableStateOf<File?>(null) }
+
+    // Launcher to CREATE a new CSV file via System File Picker
+    val createCsvLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("text/csv")
+    ) { uri: Uri? ->
+        uri?.let {
+            activeCsvUri = it
+        }
+    }
+
+    // Launcher to OPEN an existing CSV file via System File Picker
+    val openCsvLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        uri?.let {
+            activeCsvUri = it
+        }
+    }
+
+    if (activeCsvUri == null && activeFile == null) {
+        // Welcome Screen
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .statusBarsPadding()
+                .padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Text(
+                text = "YU-GI-OH BINDER LOGGER",
+                fontSize = 22.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color(0xFFFFC107)
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = "Select or create a binder log CSV file to begin.",
+                fontSize = 14.sp,
+                color = Color.Gray
+            )
+
+            Spacer(modifier = Modifier.height(32.dp))
+
+            Button(
+                onClick = { createCsvLauncher.launch("binder_log.csv") },
+                modifier = Modifier.fillMaxWidth().height(50.dp)
+            ) {
+                Icon(Icons.Default.Add, contentDescription = null)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Create New Binder Log (.csv)", fontSize = 16.sp)
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            OutlinedButton(
+                onClick = { openCsvLauncher.launch(arrayOf("text/csv", "text/comma-separated-values", "*/*")) },
+                modifier = Modifier.fillMaxWidth().height(50.dp)
+            ) {
+                Icon(Icons.Default.FolderOpen, contentDescription = null)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Open Existing Binder Log", fontSize = 16.sp)
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            TextButton(
+                onClick = {
+                    // Quick-start option: Use app's local storage default
+                    activeFile = File(context.filesDir, "binder_log.csv")
+                }
+            ) {
+                Text("Use Default Local Storage File", color = Color.Gray)
+            }
+        }
+    } else {
+        BinderLoggerScreen(
+            targetUri = activeCsvUri,
+            targetFile = activeFile,
+            onChangeFile = {
+                activeCsvUri = null
+                activeFile = null
+            }
+        )
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun BinderLoggerScreen() {
+fun BinderLoggerScreen(
+    targetUri: Uri?,
+    targetFile: File?,
+    onChangeFile: () -> Unit
+) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
 
@@ -73,6 +171,10 @@ fun BinderLoggerScreen() {
     var currentImageUrl by remember { mutableStateOf<String?>(null) }
     var isPreviewVisible by remember { mutableStateOf(false) }
 
+    // Multi-Set / Printing Dropdown State
+    var availableSets by remember { mutableStateOf<List<YgoCardSetDetail>>(emptyList()) }
+    var setDropdownExpanded by remember { mutableStateOf(false) }
+
     var qtyText by remember { mutableStateOf("1") }
     var selectedEdition by remember { mutableStateOf("1st Edition") }
     var selectedRarity by remember { mutableStateOf("Common") }
@@ -80,15 +182,34 @@ fun BinderLoggerScreen() {
     var editionDropdownExpanded by remember { mutableStateOf(false) }
 
     var historyLogs by remember { mutableStateOf<List<CardLogEntry>>(emptyList()) }
-    val csvFile = remember { File(context.filesDir, "binder_log.csv") }
+
+    fun writeTextToTarget(content: String) {
+        if (targetUri != null) {
+            context.contentResolver.openOutputStream(targetUri, "w")?.use {
+                it.write(content.toByteArray())
+            }
+        } else targetFile?.writeText(content)
+    }
+
+    fun appendTextToTarget(content: String) {
+        if (targetUri != null) {
+            context.contentResolver.openOutputStream(targetUri, "wa")?.use {
+                it.write(content.toByteArray())
+            }
+        } else targetFile?.appendText(content)
+    }
+
+    fun readLinesFromTarget(): List<String> {
+        return if (targetUri != null) {
+            context.contentResolver.openInputStream(targetUri)?.bufferedReader()?.use { it.readLines() } ?: emptyList()
+        } else if (targetFile != null && targetFile.exists()) {
+            targetFile.readLines()
+        } else emptyList()
+    }
 
     fun updateHistoryView() {
-        if (!csvFile.exists()) {
-            historyLogs = emptyList()
-            return
-        }
         try {
-            val lines = csvFile.readLines()
+            val lines = readLinesFromTarget()
             if (lines.size > 1) {
                 val entries = lines.drop(1).mapNotNull { line ->
                     val parts = line.split(",")
@@ -107,19 +228,19 @@ fun BinderLoggerScreen() {
             } else {
                 historyLogs = emptyList()
             }
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             historyLogs = emptyList()
         }
     }
 
     fun saveToCsv(entry: CardLogEntry) {
-        val fileExists = csvFile.exists()
+        val lines = readLinesFromTarget()
         val line = "\"${entry.cardName}\",${entry.quantity},\"${entry.rarity}\",\"${entry.edition}\",\"${entry.setName}\",\"${entry.setCode}\"\n"
-        if (!fileExists) {
+        if (lines.isEmpty()) {
             val header = "Card Name,Card Quantity,Card Rarity,Card Edition,Card Set,Card Set Code\n"
-            csvFile.writeText(header + line)
+            writeTextToTarget(header + line)
         } else {
-            csvFile.appendText(line)
+            appendTextToTarget(line)
         }
     }
 
@@ -147,12 +268,21 @@ fun BinderLoggerScreen() {
             .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Text(
-            text = "YU-GI-OH BINDER LOGGER",
-            fontSize = 20.sp,
-            fontWeight = FontWeight.Bold,
-            color = Color(0xFFFFC107)
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "YU-GI-OH BINDER LOGGER",
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color(0xFFFFC107)
+            )
+            IconButton(onClick = onChangeFile) {
+                Icon(Icons.Default.Folder, contentDescription = "Change File", tint = Color.LightGray)
+            }
+        }
 
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -163,7 +293,7 @@ fun BinderLoggerScreen() {
                 value = searchTerm,
                 onValueChange = { searchTerm = it },
                 label = { Text("Set Code or Card Name") },
-                placeholder = { Text("e.g. MZTM-EN039") },
+                placeholder = { Text("e.g. MZTM-EN039 or Blue-Eyes") },
                 modifier = Modifier.weight(1f),
                 singleLine = true
             )
@@ -205,9 +335,12 @@ fun BinderLoggerScreen() {
                                     currentCardName = foundCard.name
                                     currentImageUrl = foundCard.cardImages?.firstOrNull()?.imageUrlSmall
 
-                                    val matchedSet = foundCard.cardSets?.firstOrNull { s ->
+                                    val sets = foundCard.cardSets ?: emptyList()
+                                    availableSets = sets
+
+                                    val matchedSet = sets.firstOrNull { s ->
                                         s.setCode?.equals(term, ignoreCase = true) == true
-                                    }
+                                    } ?: sets.firstOrNull()
 
                                     if (matchedSet != null) {
                                         currentSetCode = matchedSet.setCode ?: "N/A"
@@ -228,7 +361,7 @@ fun BinderLoggerScreen() {
                                     isPreviewVisible = false
                                 }
                             }
-                        } catch (e: Exception) {
+                        } catch (_: Exception) {
                             withContext(Dispatchers.Main) {
                                 statusText = "Error fetching card data."
                                 statusColor = Color.Red
@@ -275,6 +408,41 @@ fun BinderLoggerScreen() {
                     }
                 }
 
+                // Dropdown to pick Set printing if multiple options exist
+                if (availableSets.isNotEmpty()) {
+                    ExposedDropdownMenuBox(
+                        expanded = setDropdownExpanded,
+                        onExpandedChange = { setDropdownExpanded = !setDropdownExpanded }
+                    ) {
+                        OutlinedTextField(
+                            value = "$currentSetCode — $currentSetName",
+                            onValueChange = {},
+                            readOnly = true,
+                            label = { Text("Select Printing / Set") },
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = setDropdownExpanded) },
+                            modifier = Modifier.fillMaxWidth().menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)
+                        )
+                        ExposedDropdownMenu(
+                            expanded = setDropdownExpanded,
+                            onDismissRequest = { setDropdownExpanded = false }
+                        ) {
+                            availableSets.forEach { setItem ->
+                                DropdownMenuItem(
+                                    text = { Text("${setItem.setCode ?: "N/A"} — ${setItem.setName ?: "N/A"}") },
+                                    onClick = {
+                                        currentSetCode = setItem.setCode ?: "N/A"
+                                        currentSetName = setItem.setName ?: "N/A"
+                                        if (RARITIES.contains(setItem.setRarity)) {
+                                            selectedRarity = setItem.setRarity!!
+                                        }
+                                        setDropdownExpanded = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedTextField(
                         value = qtyText,
@@ -296,7 +464,7 @@ fun BinderLoggerScreen() {
                             readOnly = true,
                             label = { Text("Edition") },
                             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = editionDropdownExpanded) },
-                            modifier = Modifier.menuAnchor()
+                            modifier = Modifier.menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)
                         )
                         ExposedDropdownMenu(
                             expanded = editionDropdownExpanded,
@@ -327,7 +495,7 @@ fun BinderLoggerScreen() {
                         trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = rarityDropdownExpanded) },
                         modifier = Modifier
                             .fillMaxWidth()
-                            .menuAnchor()
+                            .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)
                     )
                     ExposedDropdownMenu(
                         expanded = rarityDropdownExpanded,
@@ -394,18 +562,16 @@ fun BinderLoggerScreen() {
 
                 TextButton(
                     onClick = {
-                        if (csvFile.exists()) {
-                            val lines = csvFile.readLines()
-                            if (lines.size > 1) {
-                                val newLines = lines.dropLast(1)
-                                csvFile.writeText(newLines.joinToString("\n") + "\n")
-                                statusText = "↩ Removed last entry."
-                                statusColor = Color.Red
-                                updateHistoryView()
-                            } else {
-                                statusText = "(!) File is already empty."
-                                statusColor = Color.Red
-                            }
+                        val lines = readLinesFromTarget()
+                        if (lines.size > 1) {
+                            val newLines = lines.dropLast(1)
+                            writeTextToTarget(newLines.joinToString("\n") + "\n")
+                            statusText = "↩ Removed last entry."
+                            statusColor = Color.Red
+                            updateHistoryView()
+                        } else {
+                            statusText = "(!) File is already empty."
+                            statusColor = Color.Red
                         }
                     }
                 ) {
@@ -441,11 +607,11 @@ fun BinderLoggerScreen() {
         ) {
             Button(
                 onClick = {
-                    if (csvFile.exists()) {
+                    if (targetFile != null && targetFile.exists()) {
                         val uri: Uri = FileProvider.getUriForFile(
                             context,
                             "${context.packageName}.provider",
-                            csvFile
+                            targetFile
                         )
                         val intent = Intent(Intent.ACTION_SEND).apply {
                             type = "text/csv"
@@ -453,8 +619,15 @@ fun BinderLoggerScreen() {
                             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                         }
                         context.startActivity(Intent.createChooser(intent, "Share CSV Log"))
+                    } else if (targetUri != null) {
+                        val intent = Intent(Intent.ACTION_SEND).apply {
+                            type = "text/csv"
+                            putExtra(Intent.EXTRA_STREAM, targetUri)
+                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        }
+                        context.startActivity(Intent.createChooser(intent, "Share CSV Log"))
                     } else {
-                        Toast.makeText(context, "No CSV file found!", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, "No active CSV file found!", Toast.LENGTH_SHORT).show()
                     }
                 }
             ) {
@@ -464,4 +637,5 @@ fun BinderLoggerScreen() {
             }
         }
     }
+
 }
