@@ -4,15 +4,15 @@ plugins {
 }
 
 android {
-    namespace = "com.example.yu_gi_ohlogger" // Make sure this matches your package name
+    namespace = "com.greengogglin56.yu_gi_ohlogger"
     compileSdk = 37
 
     defaultConfig {
-        applicationId = "com.example.yu_gi_ohlogger"
+        applicationId = "com.greengogglin56.yu_gi_ohlogger"
         minSdk = 24
         targetSdk = 35
-        versionCode = 2
-        versionName = "1.0.1"
+        versionCode = 3
+        versionName = "1.1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -31,7 +31,7 @@ android {
         targetCompatibility = JavaVersion.VERSION_11
     }
     buildFeatures {
-        compose = true // Tells Android Studio to enable Jetpack Compose UI
+        compose = true
     }
 }
 
