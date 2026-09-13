@@ -1,4 +1,4 @@
-package com.example.yu_gi_ohlogger
+package com.greengogglin56.yu_gi_ohlogger
 
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory

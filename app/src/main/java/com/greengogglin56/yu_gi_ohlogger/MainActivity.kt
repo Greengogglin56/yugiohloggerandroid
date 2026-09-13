@@ -1,4 +1,4 @@
-package com.example.yu_gi_ohlogger // <--- Keep your package name here
+package com.greengogglin56.yu_gi_ohlogger // <--- Keep your package name here
 
 import android.content.Intent
 import android.net.Uri
